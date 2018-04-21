@@ -450,7 +450,7 @@ $(function() {
               
                 
                 <a class="post-title-link" href="/2018/04/20/test/" itemprop="url">
-                  test
+                  三百行代码完成一个简单的rpc框架
                 </a>
               
             
@@ -477,6 +477,28 @@ $(function() {
           </span>
 
           
+            <span class="post-category" >
+            
+              <span class="post-meta-divider">|</span>
+            
+              <span class="post-meta-item-icon">
+                <i class="fa fa-folder-o"></i>
+              </span>
+              
+                <span class="post-meta-item-text">分类于</span>
+              
+              
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/rpc/" itemprop="url" rel="index">
+                    <span itemprop="name">rpc</span>
+                  </a>
+                </span>
+
+                
+                
+              
+            </span>
+          
 
           
             
@@ -487,7 +509,7 @@ $(function() {
 			 
           
           
-             <span id="/2018/04/20/test/" class="leancloud_visitors" data-flag-title="test">
+             <span id="/2018/04/20/test/" class="leancloud_visitors" data-flag-title="三百行代码完成一个简单的rpc框架">
                <span class="post-meta-divider">|</span>
                <span class="post-meta-item-icon">
                  <i class="fa fa-eye"></i>
@@ -552,7 +574,120 @@ $(function() {
       
         
           
-            <p>rpc-基本原理,讲解，源码ddd</p>
+            <p>花了半天的时间写了个简单的rpc框架，是因为我最初看dubbo源码的时候发现dubbo虽然看起来很庞大，但是隐隐约约总感觉，其实其绝大多数功能，都是基于可扩张性和服务治理的需要而编写的。我看过dubbo和grpc的源码，这两个都是非常优秀的rpc框架，但是为了让初学rpc的同学能够快速抓住rpc的核心，所以写了这篇文章，希望看过的同学，再次去看dubbo的源码的时候，能够抓住这个核心去看。</p>
+<p>一：rpc协议的接口</p>
+<p>RpcProtocol.java</p>
+<p>public interface RpcProtocol  {<br> void export(int port);<br> Object refer(Class inrerfaceClass,String host, int port);<br>}</p>
+<p>这个接口类只提供两个接口，那是因为对于一个rpc框架来说，本质上就只需要两个接口，一个是consumer引用provider的服务，一个是provider接收到consumer的请求之后对外暴露服务。<br>下面是具体的实现。代码不复杂，可以直接复制到idea，慢慢调试</p>
+<p>二：rpc协议的具体实现</p>
+<p>RpcCore.java</p>
+<p>public class RpcCore implements RpcProtocol{</p>
+<p>private Socket socket;<br>private ObjectOutputStream objectOutputStream;<br>private ObjectInputStream objectInputStream;</p>
+<p>private ServerSocket serverSocket;<br>private Map&lt;String,List<object>&gt; services=new ConcurrentHashMap&lt;String, List<object>&gt;();<br>private Map&lt;String,Map&lt;String,Object&gt;&gt; interfaceAtrributes=new ConcurrentHashMap&lt;&gt;();</object></object></p>
+<p>@Override<br>public void export(int port){<br>    start(port);<br>}</p>
+<p>@Override<br>public Object refer(final Class interfaceClass,String host, int port){<br>    connect(host,port);<br>    return Proxy.newProxyInstance(interfaceClass.getClassLoader(), new Class[]{interfaceClass},<br>            new InvocationHandler() {<br>                @Override<br>                public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {<br>                    String interfaceName=interfaceClass.getName();<br>                    String fullName= (String) interfaceAtrributes.get(interfaceName).get(“fullName”);<br>                    return get(fullName,method,args);<br>                }<br>            });<br>}</p>
+<p>public Object get(String interfaceFullName,Method method,Object[] parames){<br>    Object result=null;<br>    try {<br>        objectOutputStream.writeUTF(interfaceFullName);<br>        objectOutputStream.writeUTF(method.getName());<br>        objectOutputStream.writeObject(method.getParameterTypes());<br>        objectOutputStream.writeObject(parames);<br>        objectOutputStream.flush();<br>        result=objectInputStream.readObject();<br>    } catch (IOException e) {<br>        e.printStackTrace();<br>    } catch (ClassNotFoundException e) {<br>        e.printStackTrace();<br>    } finally {<br>        try {<br>            if (objectOutputStream!=null) {<br>                objectOutputStream.close();<br>            }<br>            if (objectInputStream!=null) {<br>                objectInputStream.close();<br>            }<br>        } catch (IOException e) {<br>            e.printStackTrace();<br>        }<br>    }<br>    return result;</p>
+<p>}</p>
+<p>private void start(int port) {<br>    try {<br>        serverSocket = new ServerSocket();<br>        serverSocket.bind(new InetSocketAddress(“localhost”, port));<br>        init();<br>    } catch (IOException e) {<br>        e.printStackTrace();<br>    }<br>    while (true) {<br>        System.out.println(“server has started success port is —&gt;”+port);<br>        Socket socket = null;<br>        try {<br>            socket = serverSocket.accept();<br>            new Thread(new Processsor(socket,services)).start();<br>        } catch (IOException e) {<br>            e.printStackTrace();<br>        }</p>
+<pre><code>}
+</code></pre><p>}</p>
+<p>public  void init(){<br>    RpcDemo rpcDemo=new RpcDemoImplProvider();<br>    String group=”rpcDemo”;<br>    String version=”1.0.0”;<br>    String fullName=RpcDemo.class.getName()+”&amp;”+group+”&amp;”+version;<br>    List<object> rpcDemoInstances=services.get(fullName);<br>    if (rpcDemoInstances==null){<br>        rpcDemoInstances=new ArrayList();<br>        rpcDemoInstances.add(rpcDemo);<br>    }<br>    services.put(fullName,rpcDemoInstances);<br>}</object></p>
+<p>public void connect(String host, int port) {<br>    try {<br>        storeInterface();<br>        socket = new Socket();<br>        socket.connect(new InetSocketAddress(host, port));<br>        objectOutputStream=new ObjectOutputStream(socket.getOutputStream());<br>        objectInputStream=new ObjectInputStream(socket.getInputStream());<br>    } catch (IOException e) {<br>        e.printStackTrace();<br>    }</p>
+<p>}</p>
+<p>private void storeInterface(){<br>    String group=”rpcDemo”;<br>    String version=”1.0.0”;<br>    String fullName=RpcDemo.class.getName()+”&amp;”+group+”&amp;”+version;<br>    Map&lt;String,Object&gt; attributes=interfaceAtrributes.get(fullName);<br>    if (attributes==null){<br>        attributes=new ConcurrentHashMap(100);<br>        attributes.put(“group”,group);<br>        attributes.put(“version”,version);<br>        attributes.put(“fullName”,fullName);<br>    }<br>    interfaceAtrributes.put(RpcDemo.class.getName(),attributes);</p>
+<p>}</p>
+<p>class Processsor implements Runnable {<br>    private Socket socket;<br>    private ObjectInputStream objectInputStream;<br>    private ObjectOutputStream objectOutputStream;<br>    private Map&lt;String,List<object>&gt; services;<br>    private Processsor(Socket socket,Map&lt;String,List<object>&gt; services) {<br>        this.socket = socket;<br>        this.services=services;<br>    }</object></object></p>
+<pre><code>@Override
+public void run() {
+    System.out.println((((InetSocketAddress) socket.getRemoteSocketAddress()).getPort()));
+
+    try {
+        objectInputStream = new ObjectInputStream(socket.getInputStream());
+        objectOutputStream = new ObjectOutputStream(socket.getOutputStream());
+        String interfaceFullName=objectInputStream.readUTF();
+        String methodName=objectInputStream.readUTF();
+        Class[] parameTypes= (Class[]) objectInputStream.readObject();
+        Object[] objects= (Object[]) objectInputStream.readObject();
+        String interfaceName=interfaceFullName.split(&quot;&amp;&quot;)[0];
+        Class service=Class.forName(interfaceName);
+        Method method=service.getMethod(methodName,parameTypes);
+        Object instances=services.get(interfaceFullName).get(0);
+        Object result = method.invoke(instances, objects);
+        objectOutputStream.writeObject(result);
+        objectOutputStream.flush();
+        objectOutputStream.close();
+        objectInputStream.close();
+    } catch (Exception e) {
+        e.printStackTrace();
+    }
+
+}
+</code></pre><p>}</p>
+<p>}</p>
+<p>三：rpc测试的接口<br>所谓接口说白了就是协议，与http，mqtt等其他的协议本质上没什么区别，只不过rpc是强依赖，而后两个是弱依赖而已，另外之所以把实体作为内部类，是为了表达一种思想，rpc的实体类和异常都是协议的一部分，应该将他们放到一起。<br>Rpcdemo.java</p>
+<p>public interface RpcDemo {<br>Student getStudent(Integer id,String name);<br>class Student implements Serializable{<br>    public long id;<br>    public String name;<br>    public int age;<br>    public boolean man;</p>
+<pre><code>public Student(long id, String name, int age, boolean man) {
+    this.id = id;
+    this.name = name;
+    this.age = age;
+    this.man = man;
+}
+
+public long getId() {
+    return id;
+}
+
+public void setId(long id) {
+    this.id = id;
+}
+
+public String getName() {
+    return name;
+}
+
+public void setName(String name) {
+    this.name = name;
+}
+
+public int getAge() {
+    return age;
+}
+
+public void setAge(int age) {
+    this.age = age;
+}
+
+public boolean isMan() {
+    return man;
+}
+
+public void setMan(boolean man) {
+    this.man = man;
+}
+
+@Override
+public String toString() {
+    return &quot;Student{&quot; +
+            &quot;id=&quot; + id +
+            &quot;, name=&apos;&quot; + name + &apos;\&apos;&apos; +
+            &quot;, age=&quot; + age +
+            &quot;, man=&quot; + man +
+            &apos;}&apos;;
+}
+</code></pre><p>}<br>}</p>
+<p>四：接口的实现：</p>
+<p>RpcDemoImplProvider.java</p>
+<p>public class RpcDemoImplProvider implements RpcDemo{<br>public Student getStudent(Integer id,String name){<br>    return new Student(1234,”zhangsan”,20,true);<br>}</p>
+<p>public static void main(String[] args) {<br>    RpcCore rpcCore=new RpcCore();<br>    rpcCore.export(8087);<br>}<br>}</p>
+<p>五：RpcDemoConsumer.java</p>
+<p>消费端。</p>
+<p>public class RpcDemoConsumer {<br>public static void main(String[] args) {<br>    RpcCore rpcCore=new RpcCore();<br>    RpcDemo rpcDemo = (RpcDemo)rpcCore.refer(RpcDemo.class, “127.0.0.1”, 8087);</p>
+<pre><code>System.out.println(&quot; 远程调用成功&quot;);
+System.out.println(&quot;返回的结果是----&gt;&quot;+rpcDemo.getStudent(111,&quot;zhangsan&quot;));
+</code></pre><p>}<br>}</p>
+<p>六：先启动RpcDemoImplProvider<br>三百行代码完成一个简单的rpc框架</p>
+<p>七：启动RpcDemoConsumer<br>三百行代码完成一个简单的rpc框架</p>
+<p>总共也就250行代码左右。over</p>
 
           
         
@@ -986,7 +1121,21 @@ $(function() {
           
 
           
+            <div class="site-state-item site-state-categories">
+              <a href="/categories">
+                <span class="site-state-item-count">1</span>
+                <span class="site-state-item-name">分类</span>
+              </a>
+            </div>
+          
 
+          
+            <div class="site-state-item site-state-tags">
+              <a href="/tags">
+                <span class="site-state-item-count">1</span>
+                <span class="site-state-item-name">标签</span>
+              </a>
+            </div>
           
 
         </nav>
